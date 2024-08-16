@@ -14,16 +14,16 @@ SCARDHANDLE connectionHandler;
 DWORD activeProtocol;
 
 // read procedure
-void performReadOperation(char *protocol);
-void readDataFromCard(uint8_t *dataFromCard, char *protocol);
-void mifareClassicRead(uint8_t *dataFromCard);
-void mifareUltralightRead(uint8_t *dataFromCard);
+void performReadOperation(char *protocol, char *option);
+void readDataFromCard(uint8_t *dataFromCard, char *protocol, uint8_t cardNumber);
+void mifareClassicRead(uint8_t *dataFromCard, uint8_t cardNumber);
+void mifareUltralightRead(uint8_t *dataFromCard, uint8_t cardNumber);
 
 // write procedure
 void performWriteOperation(char *protocol);
-void writeDataToCard(const uint8_t *dataToWrite, char *protocol);
-void mifareClassicWrite(const uint8_t *dataToWrite);
-void mifareUltralightWrite(const uint8_t *dataToWrite);
+void writeDataToCard(const uint8_t *dataToWrite, char *protocol, uint8_t cardNumber);
+void mifareClassicWrite(const uint8_t *dataToWrite, uint8_t cardNumber);
+void mifareUltralightWrite(const uint8_t *dataToWrite, uint8_t cardNumber);
 
 // comum procedure
 void establishContext();
@@ -42,14 +42,14 @@ uint8_t response[SIZE];
 unsigned long responseLength = sizeof(response);
 
 int main(int argc, char *argv[]) {
-	if (argc != 3) {
-        printf("Usage: %s <read|write> <classic|ultra>\n", argv[0]);
+	if (argc != 4) {
+        printf("Usage: %s <read|write> <classic|ultra> <debug|main>\n", argv[0]);
         return 1;
     }
 
 	if (strcmp(argv[1], "read") == 0) {
         printf("Performing read operation...\n");
-        performReadOperation(argv[2]);
+        performReadOperation(argv[2], argv[3]);
     } else if (strcmp(argv[1], "write") == 0) {
         printf("Performing write operation...\n");
         performWriteOperation(argv[2]);
@@ -65,45 +65,59 @@ int main(int argc, char *argv[]) {
 ///////////////////////////////// read procedure //////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
 
-void performReadOperation(char *protocol){
+void performReadOperation(char *protocol, char *option){
 	establishContext();
 	listReaders();
 	connectToCard();
 
 	uint8_t dataFromCard[SIZE];
-    readDataFromCard(dataFromCard, protocol);
+	uint8_t cardNumber = 0x00;
 
 	FILE *file = fopen("card_data.txt", "w");
     if (file == NULL) {
         printf("Error opening file for writing.\n");
 		exit(1);
     }
-	
-	// Write card information to the binary file
-    for (int i = 0; i < SIZE; i++) {
-		fprintf(file, "%02X ", dataFromCard[i]);
+	int key = 0;
+	for (int j = 0; j < 64; j++) {
+		readDataFromCard(dataFromCard, protocol, cardNumber);
+		if (key <= 2 && j >= 4) {
+			// Write card information to the binary file
+			for (int i = 0; i < SIZE; i++) {
+				fprintf(file, "%02X ", dataFromCard[i]);
+			}
+			if (strcmp(option, "debug") == 0) {
+				fprintf(file, "\n");
+			}
+			key++;
+		}
+		else
+		{
+			key = 0;
+		}
+		cardNumber++;
 	}
 	fclose(file);
-
+	
 	disconnectFromCard();
 	freeListReader();
 	releaseContext();
 }
 
-void readDataFromCard(uint8_t *dataFromCard, char *protocol) {
+void readDataFromCard(uint8_t *dataFromCard, char *protocol, uint8_t cardNumber) {
 	if (strcmp(protocol, "classic") == 0) {
-		mifareClassicRead(dataFromCard);
+		mifareClassicRead(dataFromCard, cardNumber);
 	}
 	else if (strcmp(protocol, "ultra") == 0) {
-		mifareUltralightRead(dataFromCard);
+		mifareUltralightRead(dataFromCard, cardNumber);
 	} else {
 		printf("Invalid protocol: %s\n", protocol);
 		exit(1);
 	}
 }
 
-void mifareClassicRead(uint8_t *dataFromCard) {
-	uint8_t blockNumber = 0x04;
+void mifareClassicRead(uint8_t *dataFromCard, uint8_t cardNumber) {
+	uint8_t blockNumber = cardNumber;
 
 	mifareClassicAuthenticateToCard(blockNumber);
 
@@ -115,8 +129,8 @@ void mifareClassicRead(uint8_t *dataFromCard) {
 	memcpy(dataFromCard, response, SIZE);
 }
 
-void mifareUltralightRead(uint8_t *dataFromCard) {
-	uint8_t pageNumber = 0x04;
+void mifareUltralightRead(uint8_t *dataFromCard, uint8_t cardNumber) {
+	uint8_t pageNumber = cardNumber;
 	
 	// Read 4 blocks (16 bytes) starting from pageNumber
 	uint8_t readCommand[] = { 0xFF, 0xB0, 0x00, pageNumber, 0x10 };
@@ -140,33 +154,47 @@ void performWriteOperation(char *protocol){
 		exit(1);
 	}
 
+	uint8_t cardNumber = 0x04;
 	uint8_t dataToWrite[SIZE];
-	for (int i = 0; i < SIZE; i++) {
-		fscanf(file, "%02hhX", &dataToWrite[i]);
+	int key = 0;
+	for (int j = 0; j < 64; j++) {
+		if(key <= 2 && j >= 4) {
+			for (int i = 0; i < SIZE; i++) {
+				fscanf(file, "%02hhX", &dataToWrite[i]);
+				printf("%02hhX ", dataToWrite[i]);
+			}
+			key++;
+			printf("\n%02hhX\n\n", cardNumber);
+		}
+		else
+		{
+			key = 0;
+		}
+		cardNumber++;
+		// writeDataToCard(dataToWrite, protocol, cardNumber);
 	}
 	fclose(file);
 
-	writeDataToCard(dataToWrite, protocol);
 
 	disconnectFromCard();
 	freeListReader();
 	releaseContext();
 }
 
-void writeDataToCard(const uint8_t *dataToWrite, char *protocol) {
+void writeDataToCard(const uint8_t *dataToWrite, char *protocol, uint8_t cardNumber) {
     if (strcmp(protocol, "classic") == 0) {
-		mifareClassicWrite(dataToWrite);
+		mifareClassicWrite(dataToWrite, cardNumber);
 	}
 	else if (strcmp(protocol, "ultra") == 0) {
-		mifareUltralightWrite(dataToWrite);
+		mifareUltralightWrite(dataToWrite, cardNumber);
 	} else {
 		printf("Invalid protocol: %s\n", protocol);
 		exit(1);
 	}
 }
 
-void mifareClassicWrite(const uint8_t *dataToWrite) {
-	uint8_t blockNumber = 0x04;
+void mifareClassicWrite(const uint8_t *dataToWrite, uint8_t cardNumber) {
+	uint8_t blockNumber = cardNumber;
 
 	mifareClassicAuthenticateToCard(blockNumber);
 
@@ -180,9 +208,9 @@ void mifareClassicWrite(const uint8_t *dataToWrite) {
 	sendCommand(writeCommand, writeCommandLength);
 }
 
-void mifareUltralightWrite(const uint8_t *dataToWrite) {
+void mifareUltralightWrite(const uint8_t *dataToWrite, uint8_t cardNumber) {
 	printf("### MIFARE Ultralight ###\n");
-	uint8_t pageNumber = 0x04;
+	uint8_t pageNumber = cardNumber;
 	
 	// Write 1 block (4 bytes) to pageNumber
 	uint8_t data[] = { 0x00, 0x01, 0x02, 0x03 };
@@ -195,7 +223,7 @@ void mifareUltralightWrite(const uint8_t *dataToWrite) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////// comum procedure /////////////////////////////////
+///////////////////////////////// common procedure ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
 
 void establishContext() {
